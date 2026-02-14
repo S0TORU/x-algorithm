@@ -1,1 +1,11 @@
 __pycache__/
+.DS_Store
+**/.DS_Store
+
+# Rust / Cargo
+target/
+**/target/
+
+# Gazetent runtime artifacts
+gazetent/runs/
+**/gazetent/runs/

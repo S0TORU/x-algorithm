@@ -17,6 +17,7 @@ This repository contains the core recommendation system powering the "For You" f
   - [Pipeline Stages](#pipeline-stages)
   - [Scoring and Ranking](#scoring-and-ranking)
   - [Filtering](#filtering)
+- [Production Documentation](#production-documentation)
 - [Key Design Decisions](#key-design-decisions)
 - [License](#license)
 
@@ -297,6 +298,19 @@ Filters run at two stages:
 | `DedupConversationFilter` | Deduplicate multiple branches of the same conversation thread |
 
 ---
+
+## Production Documentation
+
+Production-facing docs live under `docs/for-you-feed/`:
+
+- `docs/for-you-feed/README.md`
+- `docs/for-you-feed/architecture.md`
+- `docs/for-you-feed/home-mixer.md`
+- `docs/for-you-feed/candidate-pipeline.md`
+- `docs/for-you-feed/thunder.md`
+- `docs/for-you-feed/phoenix.md`
+- `docs/for-you-feed/operations.md`
+- `docs/for-you-feed/edge-cases.md`
 
 ## Key Design Decisions
 

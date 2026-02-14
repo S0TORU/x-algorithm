@@ -1,0 +1,15 @@
+[package]
+name = "sentinelpipe-scorers"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+async-trait = "0.1"
+regex = "1"
+
+sentinelpipe-core = { path = "../sentinelpipe-core" }
+sentinelpipe-pipeline = { path = "../sentinelpipe-pipeline" }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt"] }
+uuid = { version = "1", features = ["v4"] }
