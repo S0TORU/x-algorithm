@@ -1,5 +1,7 @@
 # Gazetent User Guide (Simple)
 
+Author: Aanu Oshakuade
+
 ## 1) Connect your model
 - Open Gazetent at `http://127.0.0.1:8787`.
 - Set:
@@ -53,3 +55,5 @@ Use these artifacts for reports, audits, and regression tracking.
 - `target returned 404`: wrong base URL or endpoint path.
 - `at least one pack is required`: select or paste pack paths.
 - `invalid pack path`: path is outside workspace or missing.
+
+-Aanu

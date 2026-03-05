@@ -1,5 +1,7 @@
 # Gazetent v2 Product Plan
 
+Author: Aanu Oshakuade
+
 ## Objective
 Build a production-grade LLM red-teaming console that gives deterministic ship/no-ship evidence, supports rapid batch iteration, and is usable by mildly technical operators.
 
@@ -106,3 +108,5 @@ Slice 4: Advanced interaction layer
 - Multi-tenant auth and user management.
 - Distributed workers or remote queue orchestration.
 - Full policy DSL editor in UI.
+
+-Aanu

@@ -1,5 +1,7 @@
 # Security Policy
 
+Author: Aanu Oshakuade
+
 ## Scope
 This policy applies to the `sentinelpipe/` workspace and `gazetent-web` console.
 
@@ -40,3 +42,5 @@ If you expose this beyond localhost, add:
 - Network allow-lists for outbound model targets.
 - Audit logging and rate limiting.
 - Secret manager integration (do not pass raw keys in UI).
+
+-Aanu

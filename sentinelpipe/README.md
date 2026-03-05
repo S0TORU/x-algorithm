@@ -1,5 +1,7 @@
 # SentinelPipe / Gazetent
 
+Author: Aanu Oshakuade
+
 SentinelPipe is a local-first LLM red-teaming toolkit.
 Gazetent is the web console for running tests, batch simulations, and reproducible security reports.
 
@@ -64,3 +66,5 @@ See `USER_GUIDE.md` for operator walkthrough and `SECURITY.md` for policy/disclo
 
 ## License
 Apache-2.0 (`LICENSE`).
+
+-Aanu

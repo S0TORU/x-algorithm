@@ -1,5 +1,7 @@
 # Security Best Practices Report
 
+Author: Aanu Oshakuade
+
 ## Executive Summary
 A targeted security pass was run for Gazetent (`axum` backend + browser JS frontend). High-impact local secret handling and request hardening gaps were addressed. The current app is safer for local operation and open-source release.
 
@@ -54,3 +56,5 @@ A targeted security pass was run for Gazetent (`axum` backend + browser JS front
 ## Status
 - JS syntax check passes.
 - `cargo build -p gazetent-web` passes.
+
+-Aanu
