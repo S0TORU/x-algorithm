@@ -63,6 +63,7 @@ Stored in `gazetent/runs/<run_id>/`:
 - Request body size is capped to 1 MB.
 
 See `USER_GUIDE.md` for operator walkthrough and `SECURITY.md` for policy/disclosure.
+For executive and security leadership context, see `WHITE_PAPER.md`.
 
 ## License
 Apache-2.0 (`LICENSE`).
