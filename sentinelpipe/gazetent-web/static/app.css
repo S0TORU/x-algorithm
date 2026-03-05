@@ -538,3 +538,34 @@ tr:last-child td{border-bottom:none}
   .skeletonLine{animation:none}
   .btn[aria-busy="true"]::after{animation:none}
 }
+
+/* Force a white/off-white product canvas across all OS color schemes. */
+:root{
+  color-scheme: light;
+  --bg:#f6f7fb;
+  --panel:rgba(255,255,255,.84);
+  --glass:rgba(255,255,255,.70);
+  --glass2:rgba(255,255,255,.92);
+  --fg:#0b0b0f;
+  --muted:#6b7280;
+  --muted2:#9aa3af;
+  --line:rgba(17,24,39,.10);
+  --shadow:0 24px 80px rgba(2,6,23,.10);
+  --shadow2:0 10px 28px rgba(2,6,23,.10);
+  --ring:rgba(0,113,227,.18);
+}
+
+body{
+  background:
+    radial-gradient(1200px 720px at 12% -8%, rgba(0,113,227,.07), transparent 55%),
+    radial-gradient(980px 640px at 92% 12%, rgba(17,24,39,.04), transparent 55%),
+    linear-gradient(180deg, #ffffff 0%, #f8f9fc 45%, #f2f4f8 100%) !important;
+}
+
+.topbar,.pill,.card,.packList,.packTag,.textarea,.input,.select,.btn,.tableWrap,.summaryBar,.summaryItem,.log,.compareBox,.riskCloudWrap,#riskCloud,.modal,.code{
+  background:rgba(255,255,255,.72) !important;
+}
+
+th{
+  background:rgba(248,249,252,.95) !important;
+}

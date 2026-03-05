@@ -1,7 +1,11 @@
 use axum::{
+    body::Body,
+    extract::DefaultBodyLimit,
     extract::State,
     extract::Path,
+    http::Request,
     http::StatusCode,
+    middleware::Next,
     response::{Html, IntoResponse, Response},
     routing::{get, post},
     Json, Router,
@@ -36,6 +40,8 @@ async fn main() -> anyhow::Result<()> {
         .route("/api/runs/:run_id/download/:file", get(download_run_file))
         .route("/", get(index))
         .nest_service("/static", ServeDir::new(static_dir))
+        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .layer(axum::middleware::from_fn(security_headers))
         .with_state(Arc::new(state));
 
     let addr = SocketAddr::from(([127, 0, 0, 1], 8787));
@@ -109,7 +115,7 @@ async fn preview_packs(
 ) -> Result<Json<PackPreviewResponse>, (StatusCode, String)> {
     let mut scenarios = Vec::new();
     for path in req.pack_paths {
-        let path = resolve_path(&state.workspace_root, &path);
+        let path = resolve_pack_path(&state.workspace_root, &path)?;
         let mut pack = sentinelpipe_packs::load_pack_file(path)
             .map_err(|e| (StatusCode::BAD_REQUEST, e.to_string()))?;
         scenarios.append(&mut pack);
@@ -139,6 +145,54 @@ fn resolve_path(workspace_root: &std::path::Path, input: &str) -> std::path::Pat
     } else {
         workspace_root.join(p)
     }
+}
+
+fn resolve_pack_path(
+    workspace_root: &std::path::Path,
+    input: &str,
+) -> Result<std::path::PathBuf, (StatusCode, String)> {
+    let raw = resolve_path(workspace_root, input);
+    let canonical = raw
+        .canonicalize()
+        .map_err(|e| (StatusCode::BAD_REQUEST, format!("invalid pack path: {}", e)))?;
+    let root = workspace_root
+        .canonicalize()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    if !canonical.starts_with(&root) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "pack path must be inside workspace root".to_string(),
+        ));
+    }
+    Ok(canonical)
+}
+
+async fn security_headers(req: Request<Body>, next: Next) -> Response {
+    let mut res = next.run(req).await;
+    let headers = res.headers_mut();
+    headers.insert(
+        axum::http::header::X_CONTENT_TYPE_OPTIONS,
+        axum::http::HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        axum::http::header::X_FRAME_OPTIONS,
+        axum::http::HeaderValue::from_static("DENY"),
+    );
+    headers.insert(
+        axum::http::header::REFERRER_POLICY,
+        axum::http::HeaderValue::from_static("no-referrer"),
+    );
+    headers.insert(
+        axum::http::header::CONTENT_SECURITY_POLICY,
+        axum::http::HeaderValue::from_static(
+            "default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'",
+        ),
+    );
+    headers.insert(
+        axum::http::header::HeaderName::from_static("permissions-policy"),
+        axum::http::HeaderValue::from_static("camera=(), microphone=(), geolocation=()"),
+    );
+    res
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -476,8 +530,8 @@ async fn execute_run_request(
     let packs_abs = req
         .pack_paths
         .iter()
-        .map(|p| resolve_path(&state.workspace_root, p).to_string_lossy().to_string())
-        .collect::<Vec<_>>();
+        .map(|p| resolve_pack_path(&state.workspace_root, p).map(|x| x.to_string_lossy().to_string()))
+        .collect::<Result<Vec<_>, _>>()?;
 
     let mut scenarios_total = 0usize;
     for pack_path in &packs_abs {
@@ -787,7 +841,7 @@ const INDEX_HTML: &str = r##"<!doctype html>
             <input id="baseUrl" class="input" placeholder="http://localhost:8000" />
 
             <label class="label">API Key (optional)</label>
-            <input id="apiKey" class="input" type="password" placeholder="sk-..." />
+            <input id="apiKey" class="input" type="password" placeholder="sk-..." autocomplete="off" />
 
             <div class="formGrid">
               <div>

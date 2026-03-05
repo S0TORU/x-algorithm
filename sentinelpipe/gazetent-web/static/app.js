@@ -243,10 +243,14 @@ function parseBatchSpecs() {
 
 function applyFormDefaults() {
   const s = loadSettings() || {};
+  if (Object.prototype.hasOwnProperty.call(s, 'apiKey')) {
+    delete s.apiKey;
+    saveSettings(s);
+  }
   $('provider').value = s.provider ?? 'openAi';
   $('baseUrl').value = s.baseUrl ?? 'http://localhost:8000';
   $('model').value = s.model ?? 'meta-llama/Meta-Llama-3.1-8B-Instruct';
-  $('apiKey').value = s.apiKey ?? '';
+  $('apiKey').value = '';
   $('concurrency').value = String(s.concurrency ?? 16);
   $('timeoutMs').value = String(s.timeoutMs ?? 60000);
   $('maxTokens').value = String(s.maxTokens ?? 256);
@@ -264,7 +268,6 @@ function persistForm() {
     provider: s.provider,
     baseUrl: s.baseUrl,
     model: s.model,
-    apiKey: s.apiKey,
     concurrency: s.concurrency,
     timeoutMs: s.timeoutMs,
     maxTokens: s.maxTokens,
