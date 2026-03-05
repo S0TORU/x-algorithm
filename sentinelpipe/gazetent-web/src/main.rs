@@ -820,9 +820,14 @@ const INDEX_HTML: &str = r##"<!doctype html>
               </div>
             </div>
             <div class="actions">
-              <button class="btn btnPrimary" id="runBtn">Run</button>
+              <div class="seg" role="tablist" aria-label="Mode">
+                <button class="segBtn active" id="modeSingleBtn" type="button">Single</button>
+                <button class="segBtn" id="modeBatchBtn" type="button">Batch</button>
+              </div>
+              <button class="btn btnPrimary" id="runBtn">Run Single</button>
               <button class="btn" id="previewBtn">Preview Packs</button>
             </div>
+            <div class="hint">Workflow: Connect target -> select packs -> run single or batch -> inspect findings -> export artifacts.</div>
           </div>
 
           <div class="card">
@@ -835,6 +840,17 @@ examples/packs/canary_leak.yaml</textarea>
               <button class="btn" id="clearBtn">Clear</button>
             </div>
             <div class="hint">Tip: select packs above or paste custom paths.</div>
+          </div>
+
+          <div class="card hidden" id="batchCard">
+            <div class="cardTitle"><h2>Batch Matrix</h2></div>
+            <label class="label">Batch specs (one per line)</label>
+            <textarea id="batchSpecs" class="textarea">baseline|meta-llama/Meta-Llama-3.1-8B-Instruct|http://localhost:8000|openAi
+candidate|meta-llama/Meta-Llama-3.1-70B-Instruct|http://localhost:8000|openAi</textarea>
+            <div class="hint">Format: label|model|baseUrl|provider . Empty fields fall back to target settings above.</div>
+            <div class="actions">
+              <button class="btn btnPrimary" id="runBatchBtn">Run Batch</button>
+            </div>
           </div>
 
           <div class="card">
@@ -910,6 +926,10 @@ examples/packs/canary_leak.yaml</textarea>
                 </tbody>
               </table>
             </div>
+            <div class="riskCloudWrap">
+              <div class="riskCloudHead">Risk Point Cloud</div>
+              <canvas id="riskCloud" width="920" height="230"></canvas>
+            </div>
             <div class="footer">Tip: click a finding to inspect system prompt, prompt, and response.</div>
           </div>
 
@@ -920,6 +940,15 @@ examples/packs/canary_leak.yaml</textarea>
                 <button class="btn btnSmall" id="refreshRunsBtn">Refresh</button>
                 <input id="runsSearch" class="input search" placeholder="Search run id…" />
               </div>
+            </div>
+            <div class="compareBox">
+              <label class="label">Selected run IDs (2-5, first is base)</label>
+              <textarea id="compareRunIds" class="textarea compareText" placeholder="uuid-1&#10;uuid-2"></textarea>
+              <div class="actions">
+                <button class="btn btnSmall" id="compareBtn">Compare</button>
+                <button class="btn btnSmall" id="clearCompareBtn">Clear</button>
+              </div>
+              <div id="compareOut" class="hint">No comparison yet.</div>
             </div>
             <div class="tableWrap">
               <table>
