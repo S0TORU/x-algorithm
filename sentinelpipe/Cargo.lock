@@ -770,6 +770,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "axum",
+ "reqwest",
  "sentinelpipe-cli",
  "sentinelpipe-core",
  "sentinelpipe-packs",
@@ -1960,11 +1961,13 @@ dependencies = [
  "async-trait",
  "clap",
  "httpmock",
+ "reqwest",
  "sentinelpipe-core",
  "sentinelpipe-packs",
  "sentinelpipe-pipeline",
  "sentinelpipe-scorers",
  "sentinelpipe-targets",
+ "serde",
  "serde_json",
  "serde_yaml",
  "tempfile",
@@ -1981,6 +1984,15 @@ dependencies = [
  "serde_yaml",
  "thiserror 2.0.18",
  "uuid",
+]
+
+[[package]]
+name = "sentinelpipe-mcp"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

@@ -1,0 +1,7 @@
+{
+  "runId": "e8cfc05d-f91f-4332-bbbf-4953d23f41b7",
+  "findingsTotal": 34,
+  "canaryLeaks": 11,
+  "totalRisk": 1100.0,
+  "gatePass": false
+}

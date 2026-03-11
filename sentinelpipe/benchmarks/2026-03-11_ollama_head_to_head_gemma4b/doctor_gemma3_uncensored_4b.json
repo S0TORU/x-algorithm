@@ -1,0 +1,20 @@
+{
+  "ok": true,
+  "provider": "Ollama",
+  "base_url": "http://localhost:11434",
+  "model": "jayeshpandit2480/gemma3-UNCENSORED:4b",
+  "endpoint": "http://localhost:11434/api/tags",
+  "status": 200,
+  "status_text": "200 OK",
+  "model_available": true,
+  "available_models": [
+    "qwen3.5:latest",
+    "qwen3.5:9b",
+    "deepseek-v3.1:671b-cloud",
+    "glm-4.7-flash:latest",
+    "llama3.2:1b",
+    "jayeshpandit2480/gemma3-UNCENSORED:4b",
+    "deepseek-r1:8b"
+  ],
+  "detail": "target reachable"
+}

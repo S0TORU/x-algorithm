@@ -1,0 +1,3 @@
+display_name: SentinelPipe Red Team
+short_description: Preview and run SentinelPipe against a model or agent, then summarize deterministic findings.
+default_prompt: Preview SentinelPipe packs, walk through quick config, run the evaluation, and summarize the findings and gate result.

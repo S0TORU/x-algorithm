@@ -8,5 +8,6 @@ members = [
   "sentinelpipe-packs",
   "sentinelpipe-scorers",
   "sentinelpipe-cli",
+  "sentinelpipe-mcp",
   "gazetent-web",
 ]

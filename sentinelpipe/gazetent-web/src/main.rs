@@ -30,6 +30,7 @@ async fn main() -> anyhow::Result<()> {
 
     let app = Router::new()
         .route("/api/health", get(health))
+        .route("/api/models", get(list_models))
         .route("/api/packs/list", get(list_packs))
         .route("/api/packs/preview", post(preview_packs))
         .route("/api/run", post(run_job))
@@ -58,6 +59,66 @@ async fn health() -> impl IntoResponse {
 
 async fn index() -> Html<&'static str> {
     Html(INDEX_HTML)
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelsQuery {
+    provider: Option<String>,
+    base_url: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct ModelsListResponse {
+    models: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaTagsResponse {
+    models: Vec<OllamaTagItem>,
+}
+
+#[derive(Debug, Deserialize)]
+struct OllamaTagItem {
+    name: String,
+}
+
+async fn list_models(axum::extract::Query(query): axum::extract::Query<ModelsQuery>) -> Result<Json<ModelsListResponse>, (StatusCode, String)> {
+    let provider = query.provider.unwrap_or_else(|| "ollama".to_string());
+    if provider != "ollama" {
+        return Ok(Json(ModelsListResponse { models: vec![] }));
+    }
+
+    let base = query
+        .base_url
+        .unwrap_or_else(|| "http://localhost:11434".to_string())
+        .trim()
+        .trim_end_matches('/')
+        .to_string();
+    let url = format!("{}/api/tags", base);
+
+    let res = reqwest::Client::new()
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("failed to reach model provider: {}", e)))?;
+
+    if !res.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("model provider returned status {}", res.status()),
+        ));
+    }
+
+    let body: OllamaTagsResponse = res
+        .json()
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, format!("failed to parse model list: {}", e)))?;
+
+    let mut models = body.models.into_iter().map(|m| m.name).collect::<Vec<_>>();
+    models.sort();
+    Ok(Json(ModelsListResponse { models }))
 }
 
 #[derive(Debug, Serialize)]
@@ -219,6 +280,7 @@ struct RunResponse {
     summary: sentinelpipe_core::RunSummary,
     findings: Vec<sentinelpipe_core::Finding>,
     artifacts: ArtifactsInfo,
+    audit: RunAuditInfo,
 }
 
 #[derive(Debug, Serialize)]
@@ -228,6 +290,23 @@ struct ArtifactsInfo {
     summary_url: String,
     findings_url: String,
     config_url: String,
+}
+
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+struct RunAuditInfo {
+    provider: sentinelpipe_core::TargetProvider,
+    base_url: String,
+    model: String,
+    pack_paths: Vec<String>,
+    concurrency: usize,
+    timeout_ms: u64,
+    max_tokens: u32,
+    top_k: Option<usize>,
+    max_canary_leaks: u32,
+    max_total_risk: f64,
+    artifacts_dir: String,
+    started_at_ms: Option<u64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -311,6 +390,7 @@ struct StoredRunData {
     summary: sentinelpipe_core::RunSummary,
     findings: Vec<sentinelpipe_core::Finding>,
     artifacts: ArtifactsInfo,
+    audit: RunAuditInfo,
 }
 
 struct NoopQueryHydrator;
@@ -407,6 +487,7 @@ async fn run_job(
         summary: out.summary,
         findings: out.findings,
         artifacts: out.artifacts,
+        audit: out.audit,
     }))
 }
 
@@ -542,6 +623,13 @@ async fn execute_run_request(
 
     let mut metadata = std::collections::BTreeMap::new();
     metadata.insert("scenarios_total".to_string(), scenarios_total.to_string());
+    metadata.insert(
+        "started_at_ms".to_string(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis().to_string())
+            .unwrap_or_else(|_| "0".to_string()),
+    );
 
     let cfg = sentinelpipe_core::RunConfig {
         run_id: uuid::Uuid::new_v4(),
@@ -603,12 +691,27 @@ async fn execute_run_request(
         findings_url: format!("/api/runs/{}/download/findings.jsonl", cfg.run_id),
         config_url: format!("/api/runs/{}/download/config.redacted.json", cfg.run_id),
     };
+    let audit = RunAuditInfo {
+        provider: cfg.target.provider,
+        base_url: cfg.target.base_url.clone(),
+        model: cfg.target.model.clone(),
+        pack_paths: req.pack_paths.clone(),
+        concurrency: cfg.concurrency,
+        timeout_ms: cfg.timeout_ms,
+        max_tokens: cfg.max_tokens,
+        top_k: cfg.top_k,
+        max_canary_leaks: cfg.gate.max_canary_leaks,
+        max_total_risk: cfg.gate.max_total_risk,
+        artifacts_dir: cfg.artifacts_dir.clone(),
+        started_at_ms: cfg.metadata.get("started_at_ms").and_then(|s| s.parse::<u64>().ok()),
+    };
     Ok(RunResponse {
         run_id: cfg.run_id.to_string(),
         scenarios_total,
         summary,
         findings,
         artifacts,
+        audit,
     })
 }
 
@@ -696,6 +799,7 @@ struct GetRunResponse {
     summary: sentinelpipe_core::RunSummary,
     findings: Vec<sentinelpipe_core::Finding>,
     artifacts: ArtifactsInfo,
+    audit: RunAuditInfo,
 }
 
 async fn get_run(
@@ -710,6 +814,7 @@ async fn get_run(
         summary: run.summary,
         findings: run.findings,
         artifacts: run.artifacts,
+        audit: run.audit,
     }))
 }
 
@@ -738,9 +843,11 @@ fn load_run_data(state: &AppState, run_id: &str) -> Result<StoredRunData, (Statu
     }
 
     let cfg_path = run_dir.join("config.redacted.json");
-    let scenarios_total = std::fs::read(&cfg_path)
+    let loaded_cfg = std::fs::read(&cfg_path)
         .ok()
-        .and_then(|b| serde_json::from_slice::<sentinelpipe_core::RunConfig>(&b).ok())
+        .and_then(|b| serde_json::from_slice::<sentinelpipe_core::RunConfig>(&b).ok());
+    let scenarios_total = loaded_cfg
+        .as_ref()
         .and_then(|cfg| cfg.metadata.get("scenarios_total").and_then(|s| s.parse::<usize>().ok()));
 
     let artifacts = ArtifactsInfo {
@@ -749,6 +856,37 @@ fn load_run_data(state: &AppState, run_id: &str) -> Result<StoredRunData, (Statu
         findings_url: format!("/api/runs/{}/download/findings.jsonl", run_uuid),
         config_url: format!("/api/runs/{}/download/config.redacted.json", run_uuid),
     };
+    let audit = if let Some(cfg) = loaded_cfg {
+        RunAuditInfo {
+            provider: cfg.target.provider,
+            base_url: cfg.target.base_url,
+            model: cfg.target.model,
+            pack_paths: cfg.packs,
+            concurrency: cfg.concurrency,
+            timeout_ms: cfg.timeout_ms,
+            max_tokens: cfg.max_tokens,
+            top_k: cfg.top_k,
+            max_canary_leaks: cfg.gate.max_canary_leaks,
+            max_total_risk: cfg.gate.max_total_risk,
+            artifacts_dir: cfg.artifacts_dir,
+            started_at_ms: cfg.metadata.get("started_at_ms").and_then(|s| s.parse::<u64>().ok()),
+        }
+    } else {
+        RunAuditInfo {
+            provider: sentinelpipe_core::TargetProvider::OpenAi,
+            base_url: String::new(),
+            model: String::new(),
+            pack_paths: vec![],
+            concurrency: 0,
+            timeout_ms: 0,
+            max_tokens: 0,
+            top_k: None,
+            max_canary_leaks: 0,
+            max_total_risk: 0.0,
+            artifacts_dir: artifacts.dir.clone(),
+            started_at_ms: None,
+        }
+    };
 
     Ok(StoredRunData {
         run_id: run_uuid.to_string(),
@@ -756,6 +894,7 @@ fn load_run_data(state: &AppState, run_id: &str) -> Result<StoredRunData, (Statu
         summary,
         findings,
         artifacts,
+        audit,
     })
 }
 
@@ -808,10 +947,17 @@ const INDEX_HTML: &str = r##"<!doctype html>
   </head>
   <body>
     <div class="wrap">
-      <div class="topbar">
-        <div class="brand">
+      <div class="topbar topbarHero">
+        <div class="brand brandHero">
+          <div class="eyebrow">Local LLM Security Workbench</div>
           <div class="h1">Gazetent</div>
-          <div class="sub">Local console for LLM safety testing. Preview packs, run jobs, inspect failures.</div>
+          <div class="sub">Red-team a model, inspect deterministic failures, and export evidence without leaving one screen.</div>
+          <div class="heroStrip">
+            <div class="heroChip">connect</div>
+            <div class="heroChip">preview packs</div>
+            <div class="heroChip">run single or batch</div>
+            <div class="heroChip">triage and export</div>
+          </div>
         </div>
         <div class="right">
           <span class="pill"><span id="healthDot" class="dot"></span><span id="health">checking…</span></span>
@@ -820,10 +966,19 @@ const INDEX_HTML: &str = r##"<!doctype html>
         </div>
       </div>
 
-      <div class="grid">
-        <div class="stack">
-          <div class="card">
-            <div class="cardTitle"><h2>Target</h2></div>
+      <div class="mainLayout">
+        <aside class="controlRail">
+          <div class="card railCard launchCard">
+            <div class="sectionLead">
+              <div>
+                <div class="sectionKicker">Launch</div>
+                <h2 class="sectionTitle">Connect and Run</h2>
+              </div>
+              <div class="seg" role="tablist" aria-label="Mode">
+                <button class="segBtn active" id="modeSingleBtn" type="button">Single</button>
+                <button class="segBtn" id="modeBatchBtn" type="button">Batch</button>
+              </div>
+            </div>
             <div class="formGrid">
               <div>
                 <label class="label">Provider</label>
@@ -834,8 +989,14 @@ const INDEX_HTML: &str = r##"<!doctype html>
               </div>
               <div>
                 <label class="label">Model</label>
-                <input id="model" class="input" placeholder="e.g. meta-llama/Meta-Llama-3.1-8B-Instruct" />
+                <input id="model" class="input" list="modelOptions" placeholder="e.g. qwen3.5:9b" />
+                <datalist id="modelOptions"></datalist>
+                <div class="hint" id="modelsHint">Available models will load automatically for Ollama.</div>
               </div>
+            </div>
+            <div class="callout" id="workflowCallout">
+              <div class="calloutTitle">How to run</div>
+              <div class="calloutText">1. Confirm target settings. 2. Keep at least one pack selected. 3. Click <strong>Run Security Check</strong>.</div>
             </div>
             <label class="label">Base URL</label>
             <input id="baseUrl" class="input" placeholder="http://localhost:8000" />
@@ -874,157 +1035,228 @@ const INDEX_HTML: &str = r##"<!doctype html>
               </div>
             </div>
             <div class="actions">
-              <div class="seg" role="tablist" aria-label="Mode">
-                <button class="segBtn active" id="modeSingleBtn" type="button">Single</button>
-                <button class="segBtn" id="modeBatchBtn" type="button">Batch</button>
-              </div>
-              <button class="btn btnPrimary" id="runBtn">Run Single</button>
-              <button class="btn" id="previewBtn">Preview Packs</button>
+              <button class="btn btnPrimary btnHero" id="runBtn">Run Security Check</button>
+              <button class="btn" id="previewBtn">Preview Selected Packs</button>
             </div>
-            <div class="hint">Workflow: Connect target -> select packs -> run single or batch -> inspect findings -> export artifacts.</div>
+            <div class="hint railHint">Single mode runs one target now. Batch mode compares variants side by side.</div>
           </div>
 
-          <div class="card">
-            <div class="cardTitle"><h2>Packs</h2></div>
+          <div class="card railCard">
+            <div class="sectionLead">
+              <div>
+                <div class="sectionKicker">Suites</div>
+                <h2 class="sectionTitle">Attack Coverage</h2>
+              </div>
+            </div>
+            <div class="presetBar" id="presetBar">
+              <button class="presetBtn active" type="button" data-preset="core">Core</button>
+              <button class="presetBtn" type="button" data-preset="leakage">Leakage</button>
+              <button class="presetBtn" type="button" data-preset="adversarial">Adversarial</button>
+              <button class="presetBtn" type="button" data-preset="all">All</button>
+            </div>
+            <div class="miniStats" id="packStats">
+              <div class="miniStat"><span class="miniKey">packs</span><span class="miniVal" id="packCount">0</span></div>
+              <div class="miniStat"><span class="miniKey">scenarios</span><span class="miniVal" id="scenarioCount">0</span></div>
+              <div class="miniStat"><span class="miniKey">categories</span><span class="miniVal" id="categoryCount">0</span></div>
+            </div>
             <div id="packList" class="packList"></div>
             <label class="label">Pack paths (one per line)</label>
             <textarea id="packs" class="textarea">examples/packs/basic_injection.yaml
-examples/packs/canary_leak.yaml</textarea>
+examples/packs/canary_leak.yaml
+examples/packs/roleplay_bypass.yaml
+examples/packs/rag_exfiltration.yaml</textarea>
             <div class="actions">
               <button class="btn" id="clearBtn">Clear</button>
             </div>
-            <div class="hint">Tip: select packs above or paste custom paths.</div>
+            <div class="hint" id="packHint">Tip: start with Core, then switch to Adversarial or All when you want broader coverage.</div>
           </div>
 
-          <div class="card hidden" id="batchCard">
-            <div class="cardTitle"><h2>Batch Matrix</h2></div>
+          <div class="card railCard hidden" id="batchCard">
+            <div class="sectionLead">
+              <div>
+                <div class="sectionKicker">Matrix</div>
+                <h2 class="sectionTitle">Batch Comparison</h2>
+              </div>
+            </div>
             <label class="label">Batch specs (one per line)</label>
             <textarea id="batchSpecs" class="textarea">baseline|meta-llama/Meta-Llama-3.1-8B-Instruct|http://localhost:8000|openAi
 candidate|meta-llama/Meta-Llama-3.1-70B-Instruct|http://localhost:8000|openAi</textarea>
             <div class="hint">Format: label|model|baseUrl|provider . Empty fields fall back to target settings above.</div>
             <div class="actions">
-              <button class="btn btnPrimary" id="runBatchBtn">Run Batch</button>
+              <button class="btn btnPrimary btnHero" id="runBatchBtn">Run Batch Comparison</button>
             </div>
           </div>
 
-          <div class="card">
-            <div class="cardTitle">
-              <h2>Activity</h2>
-              <div class="toolbar">
-                <button class="btn btnSmall" id="clearLogBtn">Clear</button>
+          <div class="card railCard compactCard">
+            <div class="sectionLead">
+              <div>
+                <div class="sectionKicker">Trace</div>
+                <h2 class="sectionTitle">Activity</h2>
               </div>
+              <button class="btn btnSmall" id="clearLogBtn">Clear</button>
             </div>
             <div id="log" class="log"></div>
-            <div class="footer">Tip: errors and run IDs show up here for quick debugging.</div>
+            <div class="footer">Run IDs and failures show up here for fast debugging.</div>
           </div>
-        </div>
+        </aside>
 
-        <div class="stack">
-          <div class="card">
-            <div class="cardTitle">
-              <h2>Scenario Preview</h2>
-              <div class="toolbar">
-                <input id="search" class="input search" placeholder="Search id/category/prompt…" />
+        <main class="workspace">
+          <section class="workspacePanel workspacePrimary">
+            <div class="card workspaceCard previewCard">
+              <div class="sectionLead sectionLeadWide">
+                <div>
+                  <div class="sectionKicker">Preview</div>
+                  <h2 class="sectionTitle">Scenario Workspace</h2>
+                </div>
+                <div class="toolbar">
+                  <input id="search" class="input search" placeholder="Search id/category/prompt…" />
+                </div>
               </div>
+              <div class="visualGrid">
+                <div class="visualCard heroVisual">
+                  <div class="riskCloudHead">Coverage Heatmap</div>
+                  <canvas id="coverageHeatmap" width="920" height="220"></canvas>
+                </div>
+              </div>
+              <div class="tableWrap roomyTable">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="col160">id</th>
+                      <th class="col180">category</th>
+                      <th>prompt</th>
+                      <th class="col90">system</th>
+                      <th class="col90">canary</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rows">
+                    <tr><td colspan="5"><span class="emptyState">Click “Preview Packs”.</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="footer">Inspect scenario prompts here before spending time on full runs.</div>
             </div>
-            <div class="tableWrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style="width: 160px">id</th>
-                    <th style="width: 180px">category</th>
-                    <th>prompt</th>
-                    <th style="width: 90px">system</th>
-                    <th style="width: 90px">canary</th>
-                  </tr>
-                </thead>
-                <tbody id="rows">
-                  <tr><td colspan="5" style="color: var(--muted)">Click “Preview Packs”.</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="footer">Tip: click a row to inspect the full prompt.</div>
-          </div>
+          </section>
 
-          <div class="card">
-            <div class="cardTitle">
-              <h2>Results</h2>
-              <div class="toolbar">
-                <a class="btn btnSmall" id="dlSummary" href="#" download>Summary</a>
-                <a class="btn btnSmall" id="dlFindings" href="#" download>Findings</a>
-                <a class="btn btnSmall" id="dlConfig" href="#" download>Config</a>
+          <section class="workspacePanel workspaceSecondary">
+            <div class="card workspaceCard resultsCard">
+              <div class="sectionLead sectionLeadWide">
+                <div>
+                  <div class="sectionKicker">Analyze</div>
+                  <h2 class="sectionTitle">Results and Hotspots</h2>
+                </div>
+                <div class="toolbar">
+                  <a class="btn btnSmall" id="dlSummary" href="#" download>Summary</a>
+                  <a class="btn btnSmall" id="dlFindings" href="#" download>Findings</a>
+                  <a class="btn btnSmall" id="dlConfig" href="#" download>Config</a>
+                </div>
               </div>
+              <div id="summaryBar" class="summaryBar summaryBarLarge">
+                <div class="summaryItem"><div class="k">run</div><div class="v" id="sumRunId">—</div></div>
+                <div class="summaryItem"><div class="k">gate</div><div class="v" id="sumGate">—</div></div>
+                <div class="summaryItem"><div class="k">risk</div><div class="v" id="sumRisk">—</div></div>
+                <div class="summaryItem"><div class="k">leaks</div><div class="v" id="sumLeaks">—</div></div>
+                <div class="summaryItem"><div class="k">scenarios</div><div class="v" id="sumScenarios">—</div></div>
+                <div class="summaryItem"><div class="k">findings</div><div class="v" id="sumFindings">—</div></div>
+              </div>
+              <div class="tableWrap roomyTable">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="col160">scenario</th>
+                      <th class="col180">category</th>
+                      <th class="col90">risk</th>
+                      <th class="col90">leak</th>
+                      <th class="col90">inj</th>
+                      <th>response</th>
+                    </tr>
+                  </thead>
+                  <tbody id="findingsRows">
+                    <tr><td colspan="6"><span class="emptyState">Run a job to see findings.</span></td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div class="visualGrid twoCol">
+                <div class="visualCard">
+                  <div class="riskCloudHead">Findings Heatmap</div>
+                  <canvas id="findingsHeatmap" width="920" height="220"></canvas>
+                </div>
+                <div class="visualCard">
+                  <div class="riskCloudHead">Risk Map</div>
+                  <canvas id="riskCloud" width="920" height="220"></canvas>
+                </div>
+              </div>
+              <div class="visualGrid twoCol observabilityGrid">
+                <div class="visualCard">
+                  <div class="riskCloudHead">Signal Breakdown</div>
+                  <canvas id="signalBars" width="920" height="220"></canvas>
+                </div>
+                <div class="visualCard auditCard">
+                  <div class="riskCloudHead">Audit and Observability</div>
+                  <div id="auditPanel" class="auditPanel">
+                    <div class="auditEmpty">Run a job to populate target, gate, pack, and artifact evidence.</div>
+                  </div>
+                </div>
+              </div>
+              <div class="footer">Use the heatmap for concentration and the cloud for relative spread. Click any finding row for full evidence.</div>
             </div>
-            <div id="summaryBar" class="summaryBar">
-              <div class="summaryItem"><div class="k">run</div><div class="v" id="sumRunId">—</div></div>
-              <div class="summaryItem"><div class="k">gate</div><div class="v" id="sumGate">—</div></div>
-              <div class="summaryItem"><div class="k">risk</div><div class="v" id="sumRisk">—</div></div>
-              <div class="summaryItem"><div class="k">leaks</div><div class="v" id="sumLeaks">—</div></div>
-              <div class="summaryItem"><div class="k">scenarios</div><div class="v" id="sumScenarios">—</div></div>
-              <div class="summaryItem"><div class="k">findings</div><div class="v" id="sumFindings">—</div></div>
-            </div>
-            <div class="tableWrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style="width: 160px">scenario</th>
-                    <th style="width: 180px">category</th>
-                    <th style="width: 90px">risk</th>
-                    <th style="width: 90px">leak</th>
-                    <th style="width: 90px">inj</th>
-                    <th>response</th>
-                  </tr>
-                </thead>
-                <tbody id="findingsRows">
-                  <tr><td colspan="6" style="color: var(--muted)">Run a job to see findings.</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="riskCloudWrap">
-              <div class="riskCloudHead">Risk Point Cloud</div>
-              <canvas id="riskCloud" width="920" height="230"></canvas>
-            </div>
-            <div class="footer">Tip: click a finding to inspect system prompt, prompt, and response.</div>
-          </div>
 
-          <div class="card">
-            <div class="cardTitle">
-              <h2>Runs</h2>
-              <div class="toolbar">
-                <button class="btn btnSmall" id="refreshRunsBtn">Refresh</button>
-                <input id="runsSearch" class="input search" placeholder="Search run id…" />
+            <div class="workspaceTertiary">
+              <div class="card workspaceCard activityCard">
+                <div class="sectionLead">
+                  <div>
+                    <div class="sectionKicker">Trace</div>
+                    <h2 class="sectionTitle">Activity Feed</h2>
+                  </div>
+                  <button class="btn btnSmall" id="clearLogBtnFooter">Clear</button>
+                </div>
+                <div id="logMirror" class="log hidden"></div>
+                <div class="footer">Live activity remains in the control rail for fast operator feedback.</div>
+              </div>
+
+              <div class="card workspaceCard runsCard">
+              <div class="sectionLead sectionLeadWide">
+                <div>
+                  <div class="sectionKicker">History</div>
+                  <h2 class="sectionTitle">Runs and Comparison</h2>
+                </div>
+                  <div class="toolbar">
+                    <button class="btn btnSmall" id="refreshRunsBtn">Refresh</button>
+                    <input id="runsSearch" class="input search" placeholder="Search run id…" />
+                  </div>
+                </div>
+                <div class="compareBox">
+                  <label class="label">Selected run IDs (2-5, first is base)</label>
+                  <textarea id="compareRunIds" class="textarea compareText" placeholder="uuid-1&#10;uuid-2"></textarea>
+                  <div class="actions">
+                    <button class="btn btnSmall" id="compareBtn">Compare</button>
+                    <button class="btn btnSmall" id="clearCompareBtn">Clear</button>
+                  </div>
+                  <div id="compareOut" class="hint">No comparison yet.</div>
+                </div>
+                <div class="tableWrap roomyTable">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th class="col220">run</th>
+                        <th class="col190">time</th>
+                        <th class="col90">gate</th>
+                        <th class="col90">risk</th>
+                        <th class="col90">leaks</th>
+                        <th class="col90">scn</th>
+                        <th class="col90">find</th>
+                      </tr>
+                    </thead>
+                    <tbody id="runsRows">
+                      <tr><td colspan="7"><span class="emptyState">Click “Refresh”.</span></td></tr>
+                    </tbody>
+                  </table>
+                </div>
+                <div class="footer">Open previous runs here, add them to compare, and inspect deterministic regression deltas.</div>
               </div>
             </div>
-            <div class="compareBox">
-              <label class="label">Selected run IDs (2-5, first is base)</label>
-              <textarea id="compareRunIds" class="textarea compareText" placeholder="uuid-1&#10;uuid-2"></textarea>
-              <div class="actions">
-                <button class="btn btnSmall" id="compareBtn">Compare</button>
-                <button class="btn btnSmall" id="clearCompareBtn">Clear</button>
-              </div>
-              <div id="compareOut" class="hint">No comparison yet.</div>
-            </div>
-            <div class="tableWrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th style="width: 220px">run</th>
-                    <th style="width: 190px">time</th>
-                    <th style="width: 90px">gate</th>
-                    <th style="width: 90px">risk</th>
-                    <th style="width: 90px">leaks</th>
-                    <th style="width: 90px">scn</th>
-                    <th style="width: 90px">find</th>
-                  </tr>
-                </thead>
-                <tbody id="runsRows">
-                  <tr><td colspan="7" style="color: var(--muted)">Click “Refresh”.</td></tr>
-                </tbody>
-              </table>
-            </div>
-            <div class="footer">Tip: click a run to reload its findings and export artifacts.</div>
-          </div>
-        </div>
+          </section>
+        </main>
       </div>
     </div>
 
