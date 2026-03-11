@@ -52,6 +52,12 @@ Preview:
 cargo run -p sentinelpipe-cli -- dry-run --config examples/run.yaml --json
 ```
 
+Generate a starter config:
+
+```bash
+cargo run -p sentinelpipe-cli -- init --output sentinelpipe.ollama.yaml --provider ollama --base-url http://localhost:11434 --model llama3.2:1b --preset core --json
+```
+
 Run:
 
 ```bash
@@ -70,6 +76,24 @@ Batch:
 cargo run -p sentinelpipe-cli -- batch --config examples/run.yaml --config examples/run-ollama.yaml --json
 ```
 
+List packs:
+
+```bash
+cargo run -p sentinelpipe-cli -- list-packs --json
+```
+
+List runs:
+
+```bash
+cargo run -p sentinelpipe-cli -- list-runs --limit 10 --json
+```
+
+Compare runs:
+
+```bash
+cargo run -p sentinelpipe-cli -- compare --run-id <base> --run-id <candidate> --json
+```
+
 Web UI:
 
 ```bash
@@ -79,9 +103,12 @@ cargo run -p gazetent-web
 ## Operating Rules
 
 - Prefer preview before run
+- Prefer `init` when the user needs a clean starting config
 - Prefer `doctor` before first run against a new endpoint
 - Prefer `--json` when another agent will inspect the result
 - If the user is unsure about pack choice, start with `core`
+- Use `list-packs` to explain preset tradeoffs in a few words before picking one
+- Use `list-runs` and `compare` for regression checks instead of re-running blindly
 - If the target is newly wired, keep gates strict and packs small first
 - When the gate fails, report the exact scenario ids and categories first
 

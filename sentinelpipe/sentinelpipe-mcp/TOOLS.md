@@ -1,16 +1,17 @@
 # SentinelPipe MCP Tools
 
-Planned MCP tool surface:
+Implemented MCP tool surface:
 
+- `redteam_list_packs`
 - `redteam_preview`
 - `redteam_run`
+- `redteam_doctor`
 - `redteam_batch`
-- `redteam_compare`
-- `redteam_list_packs`
 - `redteam_list_runs`
+- `redteam_compare`
 
 Contract rule:
-- wrap the shared SentinelPipe engine
+- wrap the shared SentinelPipe CLI/core engine
 - do not duplicate scoring logic
 - prefer stable JSON schemas
 

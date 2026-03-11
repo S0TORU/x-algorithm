@@ -76,6 +76,12 @@ Help:
 cargo run -p sentinelpipe-cli -- --help
 ```
 
+Generate a starter config with pack coverage presets:
+
+```bash
+cargo run -p sentinelpipe-cli -- init --output sentinelpipe.ollama.yaml --provider ollama --base-url http://localhost:11434 --model llama3.2:1b --preset core --json
+```
+
 Preview scenarios without execution:
 
 ```bash
@@ -100,6 +106,24 @@ Run a batch across multiple configs:
 cargo run -p sentinelpipe-cli -- batch --config examples/run.yaml --config examples/run-ollama.yaml --json
 ```
 
+List built-in packs and presets:
+
+```bash
+cargo run -p sentinelpipe-cli -- list-packs --json
+```
+
+List recent runs:
+
+```bash
+cargo run -p sentinelpipe-cli -- list-runs --limit 10 --json
+```
+
+Compare historical runs:
+
+```bash
+cargo run -p sentinelpipe-cli -- compare --run-id <base> --run-id <candidate> --json
+```
+
 CLI modes:
 - default output: human-readable
 - `--json`: agent-readable and automation-friendly
@@ -115,10 +139,13 @@ cargo run -p sentinelpipe-mcp
 ```
 
 Current MCP tools:
+- `redteam_list_packs`
 - `redteam_preview`
 - `redteam_run`
 - `redteam_doctor`
 - `redteam_batch`
+- `redteam_list_runs`
+- `redteam_compare`
 
 Design rule:
 - one evaluator engine

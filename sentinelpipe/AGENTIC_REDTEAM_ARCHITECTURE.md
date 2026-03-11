@@ -23,6 +23,9 @@ The CLI now supports machine-readable output:
 ```bash
 cargo run -p sentinelpipe-cli -- run --config examples/run.yaml --json
 cargo run -p sentinelpipe-cli -- dry-run --config examples/run.yaml --json --show-prompts
+cargo run -p sentinelpipe-cli -- init --output sentinelpipe.ollama.yaml --provider ollama --base-url http://localhost:11434 --model llama3.2:1b --preset core --json
+cargo run -p sentinelpipe-cli -- list-runs --limit 10 --json
+cargo run -p sentinelpipe-cli -- compare --run-id <base> --run-id <candidate> --json
 ```
 
 That is the first requirement for safe agent invocation.
@@ -38,11 +41,14 @@ Purpose:
 - lowest-level interface for agents
 
 Required commands:
+- `init`
 - `run`
 - `dry-run`
-- `batch` (next)
-- `preview` (alias of dry-run or richer preview)
-- `doctor` (target connectivity and config checks)
+- `batch`
+- `doctor`
+- `list-packs`
+- `list-runs`
+- `compare`
 
 Required output modes:
 - human-readable default
@@ -53,13 +59,14 @@ Required output modes:
 Purpose:
 - expose SentinelPipe as tools that coding agents can call directly
 
-Target tools:
+Implemented tools:
+- `redteam_list_packs`
 - `redteam_preview`
 - `redteam_run`
+- `redteam_doctor`
 - `redteam_batch`
-- `redteam_compare`
-- `redteam_list_packs`
 - `redteam_list_runs`
+- `redteam_compare`
 
 Design rule:
 - MCP should be a thin wrapper over the CLI/core engine, not a second implementation.
@@ -154,9 +161,8 @@ For agents that support tool calling:
 
 The next engineering slice should implement:
 
-- `sentinelpipe-cli --json` polish and stable schemas
-- `doctor` subcommand
-- `sentinelpipe-mcp` crate scaffold
-- project-local Codex skill
+- `pi-redteam` command execution, not just the command contract
+- a first `redteam_init_config` MCP helper if we want agents to create configs without shelling out to `init`
+- regression workflows that compare base prompt, defended prompt, and candidate model in one request
 
 -Aanu

@@ -111,6 +111,45 @@ fn tool_list() -> Vec<Value> {
                 "additionalProperties": false
             }
         }),
+        json!({
+            "name": "redteam_list_packs",
+            "description": "List built-in SentinelPipe attack packs and preset coverage groups.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "redteam_list_runs",
+            "description": "List recent SentinelPipe runs from the local artifacts directory.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "artifacts_dir": {"type": "string"},
+                    "limit": {"type": "integer"}
+                },
+                "additionalProperties": false
+            }
+        }),
+        json!({
+            "name": "redteam_compare",
+            "description": "Compare 2-5 historical SentinelPipe runs to spot regressions and gate changes.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 5
+                    },
+                    "artifacts_dir": {"type": "string"}
+                },
+                "required": ["run_ids"],
+                "additionalProperties": false
+            }
+        }),
     ]
 }
 
@@ -119,13 +158,19 @@ fn handle_tool_call(id: Option<Value>, params: Value) -> Value {
         Some(name) => name,
         None => return error(id.unwrap_or(Value::Null), -32602, "tools/call missing name"),
     };
-    let args = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    let args = params
+        .get("arguments")
+        .cloned()
+        .unwrap_or_else(|| json!({}));
 
     let result = match name {
         "redteam_preview" => call_preview(args),
         "redteam_run" => call_run(args),
         "redteam_doctor" => call_doctor(args),
         "redteam_batch" => call_batch(args),
+        "redteam_list_packs" => call_list_packs(),
+        "redteam_list_runs" => call_list_runs(args),
+        "redteam_compare" => call_compare(args),
         _ => Err(anyhow!("unknown tool: {}", name)),
     };
 
@@ -150,8 +195,17 @@ fn handle_tool_call(id: Option<Value>, params: Value) -> Value {
 
 fn call_preview(args: Value) -> anyhow::Result<(Value, bool, String)> {
     let config_path = required_string(&args, "config_path")?;
-    let mut cli_args = vec!["dry-run".to_string(), "--config".to_string(), config_path, "--json".to_string()];
-    if args.get("show_prompts").and_then(Value::as_bool).unwrap_or(false) {
+    let mut cli_args = vec![
+        "dry-run".to_string(),
+        "--config".to_string(),
+        config_path,
+        "--json".to_string(),
+    ];
+    if args
+        .get("show_prompts")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         cli_args.push("--show-prompts".to_string());
     }
     call_cli_json(&cli_args)
@@ -159,12 +213,21 @@ fn call_preview(args: Value) -> anyhow::Result<(Value, bool, String)> {
 
 fn call_run(args: Value) -> anyhow::Result<(Value, bool, String)> {
     let config_path = required_string(&args, "config_path")?;
-    let mut cli_args = vec!["run".to_string(), "--config".to_string(), config_path, "--json".to_string()];
+    let mut cli_args = vec![
+        "run".to_string(),
+        "--config".to_string(),
+        config_path,
+        "--json".to_string(),
+    ];
     if let Some(top_k) = args.get("top_k").and_then(Value::as_u64) {
         cli_args.push("--top-k".to_string());
         cli_args.push(top_k.to_string());
     }
-    if args.get("details").and_then(Value::as_bool).unwrap_or(false) {
+    if args
+        .get("details")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         cli_args.push("--details".to_string());
     }
     call_cli_json(&cli_args)
@@ -197,8 +260,51 @@ fn call_batch(args: Value) -> anyhow::Result<(Value, bool, String)> {
         cli_args.push("--top-k".to_string());
         cli_args.push(top_k.to_string());
     }
-    if args.get("details").and_then(Value::as_bool).unwrap_or(false) {
+    if args
+        .get("details")
+        .and_then(Value::as_bool)
+        .unwrap_or(false)
+    {
         cli_args.push("--details".to_string());
+    }
+    cli_args.push("--json".to_string());
+    call_cli_json(&cli_args)
+}
+
+fn call_list_packs() -> anyhow::Result<(Value, bool, String)> {
+    call_cli_json(&["list-packs".to_string(), "--json".to_string()])
+}
+
+fn call_list_runs(args: Value) -> anyhow::Result<(Value, bool, String)> {
+    let mut cli_args = vec!["list-runs".to_string()];
+    if let Some(artifacts_dir) = args.get("artifacts_dir").and_then(Value::as_str) {
+        cli_args.push("--artifacts-dir".to_string());
+        cli_args.push(artifacts_dir.to_string());
+    }
+    if let Some(limit) = args.get("limit").and_then(Value::as_u64) {
+        cli_args.push("--limit".to_string());
+        cli_args.push(limit.to_string());
+    }
+    cli_args.push("--json".to_string());
+    call_cli_json(&cli_args)
+}
+
+fn call_compare(args: Value) -> anyhow::Result<(Value, bool, String)> {
+    let run_ids = args
+        .get("run_ids")
+        .and_then(Value::as_array)
+        .ok_or_else(|| anyhow!("run_ids must be an array"))?;
+    let mut cli_args = vec!["compare".to_string()];
+    for run_id in run_ids {
+        let run_id = run_id
+            .as_str()
+            .ok_or_else(|| anyhow!("run_ids must contain strings"))?;
+        cli_args.push("--run-id".to_string());
+        cli_args.push(run_id.to_string());
+    }
+    if let Some(artifacts_dir) = args.get("artifacts_dir").and_then(Value::as_str) {
+        cli_args.push("--artifacts-dir".to_string());
+        cli_args.push(artifacts_dir.to_string());
     }
     cli_args.push("--json".to_string());
     call_cli_json(&cli_args)
@@ -220,8 +326,12 @@ fn call_cli_json(args: &[String]) -> anyhow::Result<(Value, bool, String)> {
 
     let stdout = String::from_utf8(output.stdout).context("cli stdout was not utf-8")?;
     let stderr = String::from_utf8(output.stderr).unwrap_or_else(|_| String::new());
-    let value = serde_json::from_str::<Value>(&stdout)
-        .with_context(|| format!("cli did not emit valid json. stdout={} stderr={}", stdout, stderr))?;
+    let value = serde_json::from_str::<Value>(&stdout).with_context(|| {
+        format!(
+            "cli did not emit valid json. stdout={} stderr={}",
+            stdout, stderr
+        )
+    })?;
     Ok((value, output.status.success(), stderr))
 }
 
@@ -274,7 +384,12 @@ fn read_message<R: BufRead>(reader: &mut R) -> anyhow::Result<Option<Value>> {
             break;
         }
         if let Some(value) = line.strip_prefix("Content-Length:") {
-            content_length = Some(value.trim().parse::<usize>().context("invalid Content-Length")?);
+            content_length = Some(
+                value
+                    .trim()
+                    .parse::<usize>()
+                    .context("invalid Content-Length")?,
+            );
         }
     }
 
